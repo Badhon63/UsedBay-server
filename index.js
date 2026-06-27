@@ -26,6 +26,7 @@ async function run() {
 
     const db = client.db("usedbay");
     const productsCollection = db.collection("products");
+    const ordersCollection = db.collection("orders");
 
     app.post("/api/products", async (req, res) => {
       const data = req.body;
@@ -35,23 +36,30 @@ async function run() {
 
     app.get("/api/products", async (req, res) => {
       const sellerId = req.query.sellerId;
-      const search = req.query.search || "";
-      const sort = req.query.sort || "newest"; // newest, priceLow, priceHigh
-      const page = parseInt(req.query.page) || 1;
-      const limit = 9;
-      const skip = (page - 1) * limit;
 
       let query = {};
-
       if (sellerId) {
         query = { "sellerInfo.userId": sellerId };
       }
+
+      const result = await productsCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    app.get("/api/all-products", async (req, res) => {
+      const search = req.query.search || "";
+      const sort = req.query.sort || "newest";
+      const page = parseInt(req.query.page) || 1;
+      const limit = 10;
+      const skip = (page - 1) * limit;
+
+      let query = {};
 
       if (search) {
         query.title = { $regex: search, $options: "i" };
       }
 
-      let sortObj = { createdAt: -1 }; // newest by default
+      let sortObj = { _id: -1 };
       if (sort === "priceLow") {
         sortObj = { price: 1 };
       } else if (sort === "priceHigh") {
@@ -115,6 +123,55 @@ async function run() {
         res.send(result);
       } catch (error) {
         res.status(500).json({ error: error.message });
+      }
+    });
+
+    app.post("/api/orders", async (req, res) => {
+      const {
+        buyerInfo,
+        sellerInfo,
+        productId,
+        productTitle,
+        deliveryInfo,
+        totalAmount,
+      } = req.body;
+
+      try {
+        const order = {
+          buyerInfo,
+          sellerInfo,
+          productId,
+          productTitle,
+          deliveryInfo,
+          totalAmount,
+          paymentStatus: "paid",
+          orderStatus: "processing",
+          createdAt: new Date(),
+        };
+
+        const result = await ordersCollection.insertOne(order);
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: error.message });
+      }
+    });
+    app.get("/api/orders", async (req, res) => {
+      const buyerId = req.query.buyerId;
+      const sellerId = req.query.sellerId;
+
+      let query = {};
+      if (buyerId) {
+        query = { "buyerInfo.userId": buyerId };
+      }
+      if (sellerId) {
+        query = { "sellerInfo.userId": sellerId };
+      }
+
+      try {
+        const result = await ordersCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: error.message });
       }
     });
   } finally {
