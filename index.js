@@ -2,7 +2,10 @@ require("dotenv").config();
 const express = require("express");
 const PORT = process.env.PORT;
 const app = express();
+const cors = require("cors");
+
 app.use(express.json());
+app.use(cors());
 
 app.get("/", (req, res) => {
   res.send({ message: "homepage" });
@@ -27,6 +30,18 @@ async function run() {
     app.post("/api/products", async (req, res) => {
       const data = req.body;
       const result = await productsCollection.insertOne(data);
+      res.send(result);
+    });
+
+    app.get("/api/products", async (req, res) => {
+      const sellerId = req.query.sellerId;
+
+      let query = {};
+      if (sellerId) {
+        query = { "sellerInfo.userId": sellerId };
+      }
+
+      const result = await productsCollection.find(query).toArray();
       res.send(result);
     });
   } finally {
