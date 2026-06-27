@@ -27,6 +27,7 @@ async function run() {
     const db = client.db("usedbay");
     const productsCollection = db.collection("products");
     const ordersCollection = db.collection("orders");
+    const wishlistCollection = db.collection("wishlist");
 
     app.post("/api/products", async (req, res) => {
       const data = req.body;
@@ -155,6 +156,7 @@ async function run() {
         res.status(500).send({ error: error.message });
       }
     });
+
     app.get("/api/orders", async (req, res) => {
       const buyerId = req.query.buyerId;
       const sellerId = req.query.sellerId;
@@ -169,6 +171,63 @@ async function run() {
 
       try {
         const result = await ordersCollection.find(query).toArray();
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    app.post("/api/wishlist", async (req, res) => {
+      const { userId, productId } = req.body;
+      try {
+        const result = await wishlistCollection.insertOne({
+          userId,
+          productId,
+          createdAt: new Date(),
+        });
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    app.get("/api/wishlist", async (req, res) => {
+      const userId = req.query.userId;
+      try {
+        const result = await wishlistCollection
+          .aggregate([
+            { $match: { userId } },
+            {
+              $lookup: {
+                from: "products", // adjust to your actual products collection name
+                let: { pid: "$productId" },
+                pipeline: [
+                  {
+                    $match: {
+                      $expr: { $eq: ["$_id", { $toObjectId: "$$pid" }] },
+                    },
+                  },
+                ],
+                as: "product",
+              },
+            },
+            { $unwind: "$product" },
+          ])
+          .toArray();
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).send({ error: error.message });
+      }
+    });
+
+    app.delete("/api/wishlist/:id", async (req, res) => {
+      const { id } = req.params;
+      const { ObjectId } = require("mongodb");
+      try {
+        const result = await wishlistCollection.deleteOne({
+          _id: new ObjectId(id),
+        });
         res.send(result);
       } catch (error) {
         res.status(500).send({ error: error.message });
