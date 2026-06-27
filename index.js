@@ -11,7 +11,7 @@ app.get("/", (req, res) => {
   res.send({ message: "homepage" });
 });
 
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 const client = new MongoClient(process.env.MONGO_DB_URI, {
   serverApi: {
     version: ServerApiVersion.v1,
@@ -42,6 +42,27 @@ async function run() {
       }
 
       const result = await productsCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    app.patch("/api/products/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = {
+        _id: new ObjectId(id),
+      };
+      const newData = {
+        $set: req.body,
+      };
+      const result = await productsCollection.updateOne(query, newData);
+      res.send(result);
+    });
+
+    app.delete("/api/products/:id", async (req, res) => {
+      const { id } = req.params;
+      const query = {
+        _id: new ObjectId(id),
+      };
+      const result = await productsCollection.deleteOne(query);
       res.send(result);
     });
   } finally {
