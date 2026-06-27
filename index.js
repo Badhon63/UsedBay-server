@@ -35,14 +35,47 @@ async function run() {
 
     app.get("/api/products", async (req, res) => {
       const sellerId = req.query.sellerId;
+      const search = req.query.search || "";
+      const sort = req.query.sort || "newest"; // newest, priceLow, priceHigh
+      const page = parseInt(req.query.page) || 1;
+      const limit = 9;
+      const skip = (page - 1) * limit;
 
       let query = {};
+
       if (sellerId) {
         query = { "sellerInfo.userId": sellerId };
       }
 
-      const result = await productsCollection.find(query).toArray();
-      res.send(result);
+      if (search) {
+        query.title = { $regex: search, $options: "i" };
+      }
+
+      let sortObj = { createdAt: -1 }; // newest by default
+      if (sort === "priceLow") {
+        sortObj = { price: 1 };
+      } else if (sort === "priceHigh") {
+        sortObj = { price: -1 };
+      }
+
+      try {
+        const total = await productsCollection.countDocuments(query);
+        const result = await productsCollection
+          .find(query)
+          .sort(sortObj)
+          .skip(skip)
+          .limit(limit)
+          .toArray();
+
+        res.send({
+          products: result,
+          total,
+          pages: Math.ceil(total / limit),
+          currentPage: page,
+        });
+      } catch (error) {
+        res.status(500).send({ error: error.message });
+      }
     });
 
     app.patch("/api/products/:id", async (req, res) => {
@@ -64,6 +97,25 @@ async function run() {
       };
       const result = await productsCollection.deleteOne(query);
       res.send(result);
+    });
+
+    app.get("/api/products/:id", async (req, res) => {
+      const { id } = req.params;
+      const { ObjectId } = require("mongodb");
+
+      try {
+        const result = await productsCollection.findOne({
+          _id: new ObjectId(id),
+        });
+
+        if (!result) {
+          return res.status(404).json({ error: "Product not found" });
+        }
+
+        res.send(result);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
     });
   } finally {
     // await client.close();
