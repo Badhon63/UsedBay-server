@@ -144,7 +144,7 @@ async function run() {
       try {
         const result = await ordersCollection.updateOne(
           { _id: new ObjectId(id) },
-          { $set: { orderStatus } }
+          { $set: { orderStatus } },
         );
         res.send(result);
       } catch (error) {
@@ -169,7 +169,7 @@ async function run() {
           .filter((o) => o.paymentStatus === "paid")
           .reduce((sum, o) => sum + (o.totalAmount || 0), 0);
         const pendingOrders = orders.filter(
-          (o) => o.orderStatus === "pending"
+          (o) => o.orderStatus === "pending",
         ).length;
 
         const monthly = {};
@@ -345,7 +345,7 @@ async function run() {
       try {
         const result = await usersCollection.updateOne(
           { _id: new ObjectId(id) },
-          { $set: { status } }
+          { $set: { status } },
         );
         res.send(result);
       } catch (error) {
@@ -386,6 +386,50 @@ async function run() {
         res.send(result);
       } catch (error) {
         res.status(500).send({ error: error.message });
+      }
+    });
+
+    app.post("/api/payment/create-intent", async (req, res) => {
+      const { amount } = req.body;
+      try {
+        const paymentIntent = await stripe.paymentIntents.create({
+          amount: Math.round(amount * 100), // Convert to cents
+          currency: "bdt",
+        });
+        res.json({ clientSecret: paymentIntent.client_secret });
+      } catch (error) {
+        res.status(400).json({ error: error.message });
+      }
+    });
+
+    app.get("/api/payment/history", async (req, res) => {
+      try {
+        const { userId } = req.query;
+
+        if (!userId) {
+          return res.status(400).json({ error: "userId required" });
+        }
+
+        // Fetch all orders/payments for this buyer
+        const payments = await Order.find({ "buyerInfo.userId": userId })
+          .select(
+            "transactionId totalAmount paymentMethod paymentStatus createdAt",
+          )
+          .sort({ createdAt: -1 });
+
+        // Transform to match frontend expectations
+        const formattedPayments = payments.map((order) => ({
+          _id: order._id,
+          transactionId: order.transactionId,
+          amount: order.totalAmount,
+          paymentMethod: "card", // or store actual method in Order schema
+          paymentStatus: order.paymentStatus || "success",
+          paymentDate: order.createdAt,
+        }));
+
+        res.json(formattedPayments);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
       }
     });
 
