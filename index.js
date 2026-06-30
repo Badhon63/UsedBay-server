@@ -141,6 +141,8 @@ async function run() {
     app.patch("/api/orders/:id", async (req, res) => {
       const { id } = req.params;
       const { orderStatus } = req.body;
+      const { ObjectId } = require("mongodb");
+
       try {
         const result = await ordersCollection.updateOne(
           { _id: new ObjectId(id) },
@@ -410,24 +412,157 @@ async function run() {
           return res.status(400).json({ error: "userId required" });
         }
 
-        // Fetch all orders/payments for this buyer
-        const payments = await Order.find({ "buyerInfo.userId": userId })
-          .select(
-            "transactionId totalAmount paymentMethod paymentStatus createdAt",
-          )
-          .sort({ createdAt: -1 });
+        const payments = await ordersCollection
+          .find({ "buyerInfo.userId": userId })
+          .sort({ createdAt: -1 })
+          .toArray();
 
-        // Transform to match frontend expectations
         const formattedPayments = payments.map((order) => ({
           _id: order._id,
-          transactionId: order.transactionId,
+          transactionId: order.transactionId || order._id,
           amount: order.totalAmount,
-          paymentMethod: "card", // or store actual method in Order schema
+          paymentMethod: "card",
           paymentStatus: order.paymentStatus || "success",
           paymentDate: order.createdAt,
         }));
 
         res.json(formattedPayments);
+      } catch (error) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    app.get("/api/seller-dashboard/:sellerId", async (req, res) => {
+      const { sellerId } = req.params;
+
+      try {
+        // Total products
+        const totalProducts = await productsCollection.countDocuments({
+          "sellerInfo.userId": sellerId,
+        });
+
+        // Total orders & revenue
+        const orders = await ordersCollection
+          .find({ "sellerInfo.userId": sellerId })
+          .toArray();
+        const totalSales = orders.length;
+        const totalRevenue = orders.reduce(
+          (sum, o) => sum + (o.totalAmount || 0),
+          0,
+        );
+        const pendingOrders = orders.filter(
+          (o) => o.orderStatus === "pending",
+        ).length;
+
+        // Monthly sales (last 6 months)
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(sixMonthsAgo.getMonth() - 6);
+
+        const monthlyData = await ordersCollection
+          .aggregate([
+            {
+              $match: {
+                "sellerInfo.userId": sellerId,
+                createdAt: { $gte: sixMonthsAgo },
+              },
+            },
+            {
+              $group: {
+                _id: {
+                  month: { $month: "$createdAt" },
+                  year: { $year: "$createdAt" },
+                },
+                sales: { $sum: 1 },
+              },
+            },
+            { $sort: { "_id.year": 1, "_id.month": 1 } },
+          ])
+          .toArray();
+
+        const monthNames = [
+          "Jan",
+          "Feb",
+          "Mar",
+          "Apr",
+          "May",
+          "Jun",
+          "Jul",
+          "Aug",
+          "Sep",
+          "Oct",
+          "Nov",
+          "Dec",
+        ];
+        const chartData = monthlyData.map((m) => ({
+          month: monthNames[m._id.month - 1],
+          sales: m.sales,
+        }));
+
+        // Top selling products
+        const topProducts = await ordersCollection
+          .aggregate([
+            { $match: { "sellerInfo.userId": sellerId } },
+            {
+              $group: {
+                _id: "$productId",
+                name: { $first: "$productTitle" },
+                sales: { $sum: 1 },
+                revenue: { $sum: "$totalAmount" },
+              },
+            },
+            { $sort: { sales: -1 } },
+            { $limit: 5 },
+          ])
+          .toArray();
+
+        const formattedTopProducts = topProducts.map((p) => ({
+          id: p._id,
+          name: p.name,
+          sales: p.sales,
+          revenue: `৳${p.revenue.toLocaleString()}`,
+        }));
+
+        // Recent products (any 5)
+        const recentProducts = await productsCollection
+          .find({ "sellerInfo.userId": sellerId })
+          .limit(5)
+          .toArray();
+
+        const formattedRecentProducts = recentProducts.map((p) => ({
+          id: p._id,
+          name: p.title,
+          price: `৳${p.price.toLocaleString()}`,
+          status: p.status,
+        }));
+
+        // Recent orders (5)
+        const recentOrders = await ordersCollection
+          .find({ "sellerInfo.userId": sellerId })
+          .sort({ createdAt: -1 })
+          .limit(5)
+          .toArray();
+
+        const formattedRecentOrders = recentOrders.map((o, idx) => ({
+          id: idx + 1,
+          orderNum: `ORD-${String(idx + 1).padStart(3, "0")}`,
+          buyer: o.buyerInfo.name,
+          product: o.productTitle,
+          status: o.orderStatus,
+          amount: `৳${o.totalAmount.toLocaleString()}`,
+        }));
+
+        res.json({
+          stats: {
+            totalProducts,
+            totalSales,
+            totalRevenue: `৳${totalRevenue.toLocaleString()}`,
+            pendingOrders,
+          },
+          chartData,
+          topProducts: formattedTopProducts,
+          recentProducts: formattedRecentProducts,
+          recentOrders: formattedRecentOrders,
+        });
       } catch (error) {
         res.status(500).json({ error: error.message });
       }
